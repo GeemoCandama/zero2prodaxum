@@ -1,13 +1,10 @@
 use secrecy::ExposeSecret;
-use sqlx::{PgConnection, Connection, PgPool, Executor};
+use sqlx::{Connection, Executor, PgConnection, PgPool};
 use zero2prod::configuration::{get_configuration, DatabaseSettings};
 
 #[tokio::test]
 async fn health_check_works() {
-    let TestApp {
-        address,
-        ..
-    } = spawn_app().await;
+    let TestApp { address, .. } = spawn_app().await;
 
     let client = reqwest::Client::new();
     let response = client
@@ -22,10 +19,7 @@ async fn health_check_works() {
 
 #[tokio::test]
 async fn subscribe_returns_a_200_for_valid_form_data() {
-    let TestApp {
-        address,
-        db_pool,
-    } = spawn_app().await;
+    let TestApp { address, db_pool } = spawn_app().await;
 
     let client = reqwest::Client::new();
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
@@ -44,16 +38,13 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
         .await
         .expect("Failed to fetch saved subscription.");
 
-    assert_eq!(saved.email, "ursula_le_guin@gmail.com" );
+    assert_eq!(saved.email, "ursula_le_guin@gmail.com");
     assert_eq!(saved.name, "le guin");
 }
 
 #[tokio::test]
 async fn subscribe_returns_a_400_when_data_is_missing() {
-    let TestApp {
-        address,
-        ..
-    } = spawn_app().await;
+    let TestApp { address, .. } = spawn_app().await;
 
     let client = reqwest::Client::new();
 
@@ -86,8 +77,8 @@ pub struct TestApp {
     pub db_pool: sqlx::PgPool,
 }
 
-use zero2prod::telemetry::{get_subscriber, init_subscriber};
 use once_cell::sync::Lazy;
+use zero2prod::telemetry::{get_subscriber, init_subscriber};
 // Ensure that the tracing stack is only initialized once using once_cell
 static TRACING: Lazy<()> = Lazy::new(|| {
     let default_filter_level = String::from("info");
@@ -108,21 +99,18 @@ static TRACING: Lazy<()> = Lazy::new(|| {
 // Launch application in the background
 async fn spawn_app() -> TestApp {
     use std::net::TcpListener;
-    
+
     // Initialize tracing stack only once!
     Lazy::force(&TRACING);
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .expect("Failed to bind random port");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
 
     let port = listener.local_addr().unwrap().port();
     let address = format!("http://127.0.0.1:{}", port);
 
-    let mut config = get_configuration()
-        .expect("Failed to read configuration.");
+    let mut config = get_configuration().expect("Failed to read configuration.");
     config.database.database_name = uuid::Uuid::new_v4().to_string();
 
-    let db_pool = configure_database(&config.database)
-        .await;
+    let db_pool = configure_database(&config.database).await;
     let service = zero2prod::startup::app_router(db_pool.clone()).into_make_service();
     tokio::spawn(async move {
         axum::Server::from_tcp(listener)
@@ -132,18 +120,17 @@ async fn spawn_app() -> TestApp {
             .unwrap();
     });
 
-    TestApp {
-        address,
-        db_pool,
-    }
+    TestApp { address, db_pool }
 }
 
 pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
-    let mut connection = PgConnection::connect(&config.connection_string_without_db().expose_secret())
-        .await
-        .expect("Failed to connect to Postgres.");
+    let mut connection =
+        PgConnection::connect(&config.connection_string_without_db().expose_secret())
+            .await
+            .expect("Failed to connect to Postgres.");
 
-    connection.execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
+    connection
+        .execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
         .await
         .expect("Failed to create database.");
 

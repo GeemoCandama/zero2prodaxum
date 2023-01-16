@@ -1,9 +1,6 @@
-use axum::{
-    Form,
-    extract::State,
-};
-use serde::Deserialize;
+use axum::{extract::State, Form};
 use http::StatusCode;
+use serde::Deserialize;
 
 use crate::startup::AppState;
 
@@ -36,18 +33,11 @@ pub async fn subscribe(
     }
 }
 
-
 // insert a new subscriber into the database.
 // this procedural macro instuments the function insert_subscriber
 // with a span that has the name "insert_subscriber"
-#[tracing::instrument(
-    name = "Getting all subscribers",
-    skip(form, pool),
-)]
-pub async fn insert_subscriber(
-    pool: &sqlx::PgPool,
-    form: &FormData,
-) -> Result<(), sqlx::Error> {
+#[tracing::instrument(name = "Getting all subscribers", skip(form, pool))]
+pub async fn insert_subscriber(pool: &sqlx::PgPool, form: &FormData) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at)

@@ -1,6 +1,6 @@
-use uuid::Uuid;
 use std::fmt;
 use std::task::{Context, Poll};
+use uuid::Uuid;
 
 use http::Request;
 use tower_layer::Layer;
