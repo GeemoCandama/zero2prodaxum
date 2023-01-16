@@ -1,11 +1,20 @@
+use secrecy::ExposeSecret;
 use zero2prod::startup::run;
 use zero2prod::configuration::get_configuration;
-use sqlx::PgPool;
+use zero2prod::telemetry::{get_subscriber, init_subscriber};
 
 #[tokio::main]
 async fn main() -> hyper::Result<()> {
+    // telemetry setup
+    let subscriber = get_subscriber(
+        "zero2prod".into(), 
+        "info".into(),
+        std::io::stdout,
+    );
+    init_subscriber(subscriber);
+
     let config = get_configuration().expect("Failed to read configuration.");
-    let db_pool = PgPool::connect(&config.database.connection_string())
+    let db_pool = sqlx::PgPool::connect(&config.database.connection_string().expose_secret())
         .await
         .expect("Failed to connect to Postgres.");
     

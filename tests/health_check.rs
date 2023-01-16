@@ -1,3 +1,4 @@
+use secrecy::ExposeSecret;
 use sqlx::{PgConnection, Connection, PgPool, Executor};
 use zero2prod::configuration::{get_configuration, DatabaseSettings};
 
@@ -85,10 +86,31 @@ pub struct TestApp {
     pub db_pool: sqlx::PgPool,
 }
 
+use zero2prod::telemetry::{get_subscriber, init_subscriber};
+use once_cell::sync::Lazy;
+// Ensure that the tracing stack is only initialized once using once_cell
+static TRACING: Lazy<()> = Lazy::new(|| {
+    let default_filter_level = String::from("info");
+    let subscriber_name = String::from("test");
+
+    // If you want to see all the logs set TEST_LOG to true ex:
+    // TEST_LOG=true cargo #[test]
+    // to make them pretty use: TEST_LOG=true cargo test health_check_works | bunyan
+    if std::env::var("TEST_LOG").is_ok() {
+        let subscriber = get_subscriber(subscriber_name, default_filter_level, std::io::stdout);
+        init_subscriber(subscriber);
+    } else {
+        let subscriber = get_subscriber(subscriber_name, default_filter_level, std::io::sink);
+        init_subscriber(subscriber);
+    }
+});
+
 // Launch application in the background
 async fn spawn_app() -> TestApp {
     use std::net::TcpListener;
-
+    
+    // Initialize tracing stack only once!
+    Lazy::force(&TRACING);
     let listener = TcpListener::bind("127.0.0.1:0")
         .expect("Failed to bind random port");
 
@@ -117,7 +139,7 @@ async fn spawn_app() -> TestApp {
 }
 
 pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
-    let mut connection = PgConnection::connect(&config.connection_string_without_db())
+    let mut connection = PgConnection::connect(&config.connection_string_without_db().expose_secret())
         .await
         .expect("Failed to connect to Postgres.");
 
@@ -125,7 +147,7 @@ pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .await
         .expect("Failed to create database.");
 
-    let db_pool = PgPool::connect(&config.connection_string())
+    let db_pool = PgPool::connect(&config.connection_string().expose_secret())
         .await
         .expect("Failed to connect to Postgres.");
     sqlx::migrate!("./migrations")
