@@ -1,4 +1,3 @@
-use secrecy::ExposeSecret;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use zero2prod::configuration::{get_configuration, DatabaseSettings};
 
@@ -72,6 +71,34 @@ async fn subscribe_returns_a_400_when_data_is_missing() {
     }
 }
 
+#[tokio::test]
+async fn subscribe_returns_a_400_when_fields_are_present_but_invalid() {
+    let TestApp { address, .. } = spawn_app().await;
+    let client = reqwest::Client::new();
+    let test_cases = vec![
+        ("name=&email=ursula_le_guin%40gmail.com", "empty name"),
+        ("name=le%20guin&email=", "empty email"),
+        ("name=Ursula&email=not-an-email", "invalid_email"),
+    ];
+
+    for (body, description) in test_cases {
+        let response = client
+            .post(&format!("{}/subscriptions", &address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+            .expect("Failed to execute request.");
+
+        assert_eq!(
+            400,
+            response.status().as_u16(),
+            "The API did not return 400 Bad Request when the payload was {}.",
+            description
+        );
+    }
+}
+
 pub struct TestApp {
     pub address: String,
     pub db_pool: sqlx::PgPool,
@@ -125,7 +152,7 @@ async fn spawn_app() -> TestApp {
 
 pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
     let mut connection =
-        PgConnection::connect(&config.connection_string_without_db().expose_secret())
+        PgConnection::connect_with(&config.without_db())
             .await
             .expect("Failed to connect to Postgres.");
 
@@ -134,7 +161,7 @@ pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .await
         .expect("Failed to create database.");
 
-    let db_pool = PgPool::connect(&config.connection_string().expose_secret())
+    let db_pool = PgPool::connect_with(config.with_db())
         .await
         .expect("Failed to connect to Postgres.");
     sqlx::migrate!("./migrations")
