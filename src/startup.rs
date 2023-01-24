@@ -40,7 +40,7 @@ impl Application
         let address = format!("{}:{}", config.application.host, config.application.port);
         let tcplistener = std::net::TcpListener::bind(address).expect("Failed to bind port");
         let port = tcplistener.local_addr().unwrap().port();
-        let server = run(tcplistener, db_pool, email_client)?;
+        let server = run(tcplistener, db_pool, email_client, config.application.base_url)?;
 
         Ok(Self { port, server })
     }
@@ -60,29 +60,33 @@ pub type MyServer = Server<AddrIncoming, IntoMakeService<Router<(), Body>>>;
 pub struct AppState {
     pub db_pool: PgPool,
     pub email_client: EmailClient,
+    pub base_url: String,
 }
 
 pub fn run(
     listener: TcpListener,
     db_pool: PgPool,
     email_client: EmailClient,
+    base_url: String,
 ) -> Result<MyServer, hyper::Error> {
     let address = listener.local_addr().expect("Failed to get local address");
-    let app = app_router(db_pool, email_client);
+    let app = app_router(db_pool, email_client, base_url);
     tracing::info!("listening on {}", address);
     // launch the application
     let server = axum::Server::from_tcp(listener)?;
     Ok(server.serve(app.into_make_service()))
 }
 
-pub fn app_router(db_pool: PgPool, email_client: EmailClient) -> Router {
+pub fn app_router(db_pool: PgPool, email_client: EmailClient, base_url: String) -> Router {
     let app_state = AppState {
         db_pool,
         email_client,
+        base_url,
     };
     Router::new()
         .route("/health_check", get(health_check))
         .route("/subscriptions", post(subscribe))
+        .route("/subscriptions/confirm", get(confirm))
         .with_state(app_state)
         // A span is created for each request and ends with the response is sent
         .layer(TraceLayer::new_for_http().make_span_with(TowerMakeSpanWithConstantId))
