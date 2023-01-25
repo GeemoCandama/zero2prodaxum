@@ -31,6 +31,8 @@ unicode-segmentation = "1"
 validator = "0.16.0"
 reqwest = {version = "0.11.13", features = ["json"]}
 rand = { version = "0.8.5", features=["std_rng"] }
+thiserror = "1"
+anyhow = "1"
 
 [dependencies.sqlx]
 version = "0.6.2"
