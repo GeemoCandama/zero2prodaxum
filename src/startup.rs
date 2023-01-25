@@ -87,6 +87,7 @@ pub fn app_router(db_pool: PgPool, email_client: EmailClient, base_url: String) 
         .route("/health_check", get(health_check))
         .route("/subscriptions", post(subscribe))
         .route("/subscriptions/confirm", get(confirm))
+        .route("/newsletters", post(publish_newsletter))
         .with_state(app_state)
         // A span is created for each request and ends with the response is sent
         .layer(TraceLayer::new_for_http().make_span_with(TowerMakeSpanWithConstantId))
