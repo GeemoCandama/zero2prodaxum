@@ -5,6 +5,7 @@ use tracing::{error_span, Span, Subscriber};
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
+use tokio::task::JoinHandle;
 
 use crate::middleware::RequestId;
 /// Compose multiple layers into a `tracing`'s subscriber.
@@ -57,4 +58,15 @@ impl<B> MakeSpan<B> for TowerMakeSpanWithConstantId {
             uri = %request.uri(),
         )
     }
+}
+
+pub fn spawn_blocking_with_tracing<F, R>(f: F) -> JoinHandle<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let current_span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || {
+        current_span.in_scope(f)
+    })
 }

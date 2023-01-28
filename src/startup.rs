@@ -8,6 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::net::TcpListener;
 use tower_http::trace::TraceLayer;
+use secrecy::Secret;
 
 use crate::configuration::{DatabaseSettings, Settings};
 use crate::email_client::EmailClient;
@@ -40,7 +41,13 @@ impl Application
         let address = format!("{}:{}", config.application.host, config.application.port);
         let tcplistener = std::net::TcpListener::bind(address).expect("Failed to bind port");
         let port = tcplistener.local_addr().unwrap().port();
-        let server = run(tcplistener, db_pool, email_client, config.application.base_url)?;
+        let server = run(
+            tcplistener, 
+            db_pool, 
+            email_client, 
+            config.application.base_url,
+            HmacSecret(config.application.hmac_secret),
+        )?;
 
         Ok(Self { port, server })
     }
@@ -61,30 +68,43 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub email_client: EmailClient,
     pub base_url: String,
+    pub secret: HmacSecret,
 }
+
+#[derive(Clone)]
+pub struct HmacSecret(pub Secret<String>);
 
 pub fn run(
     listener: TcpListener,
     db_pool: PgPool,
     email_client: EmailClient,
     base_url: String,
+    hmac_secret: HmacSecret,
 ) -> Result<MyServer, hyper::Error> {
     let address = listener.local_addr().expect("Failed to get local address");
-    let app = app_router(db_pool, email_client, base_url);
+    let app = app_router(db_pool, email_client, base_url, hmac_secret);
     tracing::info!("listening on {}", address);
     // launch the application
     let server = axum::Server::from_tcp(listener)?;
     Ok(server.serve(app.into_make_service()))
 }
 
-pub fn app_router(db_pool: PgPool, email_client: EmailClient, base_url: String) -> Router {
+pub fn app_router(
+    db_pool: PgPool, 
+    email_client: EmailClient, 
+    base_url: String,
+    hmac_secret: HmacSecret,
+) -> Router {
     let app_state = AppState {
         db_pool,
         email_client,
         base_url,
+        secret: hmac_secret,
     };
     Router::new()
         .route("/health_check", get(health_check))
+        .route("/", get(home))
+        .route("/login", get(login_form).post(login))
         .route("/subscriptions", post(subscribe))
         .route("/subscriptions/confirm", get(confirm))
         .route("/newsletters", post(publish_newsletter))
