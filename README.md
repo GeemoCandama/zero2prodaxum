@@ -1,0 +1,1 @@
+This is my readthrough of Zero To Production in Rust. As an exercise and to keep myself focused I chose to use the web framwork axum as opposed to the framework used in the book: actix-web. Some things aren't working quite as well as I'd like them to but I was primarily using this book as a stepping stone to implementing a project I find more interesting.
