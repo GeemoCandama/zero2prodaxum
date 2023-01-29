@@ -1,11 +1,18 @@
 use axum::{
+    extract::FromRef,
     response::Html,
     http::StatusCode,
 };
-use axum_extra::extract::cookie::{CookieJar, Cookie};
+use axum_extra::extract::cookie::{SignedCookieJar, Cookie, Key};
+use crate::startup::AppState;
 
+impl FromRef<AppState> for Key {
+    fn from_ref(state: &AppState) -> Self {
+        state.secret.clone()
+    }
+}
 
-pub async fn login_form(jar: CookieJar) -> (StatusCode, CookieJar, Html<String>) {
+pub async fn login_form(jar: SignedCookieJar) -> (StatusCode, SignedCookieJar, Html<String>) {
     let error_html = match jar.get("_flash") {
         Some(cookie) => format!(r#"<p><i>{}</i></p>"#, cookie.value()),
         None => String::new(),

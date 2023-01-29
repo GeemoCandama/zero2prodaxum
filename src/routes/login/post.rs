@@ -1,12 +1,19 @@
+// Consider using a typed session to enable a more type-safe API if the application
+// is more complicated.
+// For this project we will use the interface provided by axum_sessions. That is:
+// WritableSession and ReadableSession.
+
 use axum::{
     extract::{State, Form},
-    response::{Redirect, IntoResponse, Response},
+    response::{IntoResponse, Response},
     http::{
-        header::{SET_COOKIE, LOCATION},
+        header::LOCATION,
         StatusCode,
     },
 };
+use axum_sessions::extractors::WritableSession;
 use secrecy::Secret;
+use axum_extra::extract::cookie::{SignedCookieJar, Cookie};
 
 use crate::authentication::{validate_credentials, Credentials, AuthError};
 use crate::startup::AppState;
@@ -27,6 +34,8 @@ pub struct FormData {
 )]
 pub async fn login(
     State(state): State<AppState>,
+    jar: SignedCookieJar,
+    session: WritableSession,
     Form(login_form): Form<FormData>
 ) -> Response {
     let credentials = Credentials {
@@ -37,23 +46,38 @@ pub async fn login(
         .record("username", &tracing::field::debug(&credentials.username));
     match validate_credentials(credentials, &state.db_pool).await {
         Ok(user_id) => {
-            tracing::Span::current().record("user_id", &tracing::field::display(&user_id));
-            Redirect::to("/").into_response()
+            match insert_user_id(session, user_id) {
+                Ok(_) => {
+                    tracing::Span::current().record("user_id", &tracing::field::display(&user_id));
+                    (
+                        StatusCode::SEE_OTHER,
+                        [
+                            (LOCATION, "/admin/dashboard"),
+                        ],
+                    ).into_response()
+                },
+                Err(e) => {
+                    tracing::error!("Failed to insert user_id into session");
+                    login_error_response(e.to_string(), jar)
+                }
+            }
         },
         Err(e) => {
             let e = match e {
                 AuthError::InvalidCredentials(_) => LoginError::AuthError(e.into()),
                 AuthError::UnexpectedError(_) => LoginError::UnexpectedError(e.into()),
             };
-            (
-                StatusCode::SEE_OTHER,
-                [
-                    (LOCATION, "/login"),
-                    (SET_COOKIE, &format!("_flash={e}")),
-                ],
-            ).into_response()
+            login_error_response(e.to_string(), jar)
         },
     }
+}
+
+pub fn insert_user_id(
+    mut session: WritableSession,
+    user_id: uuid::Uuid,
+) -> Result<(), serde_json::Error> {
+    session.regenerate();
+    session.insert("user_id", user_id)
 }
 
 #[derive(thiserror::Error)]
@@ -68,4 +92,14 @@ impl std::fmt::Debug for LoginError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         error_chain_fmt(self, f)
     }
+}
+
+fn login_error_response(error_string: String, jar: SignedCookieJar) -> Response {
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (LOCATION, "/login"),
+        ],
+        jar.add(Cookie::new("_flash", error_string)),
+    ).into_response()
 }

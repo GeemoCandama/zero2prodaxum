@@ -8,7 +8,10 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::net::TcpListener;
 use tower_http::trace::TraceLayer;
-use secrecy::Secret;
+use secrecy::{Secret, ExposeSecret};
+use axum_extra::extract::cookie::Key;
+use async_redis_session::RedisSessionStore;
+use axum_sessions::SessionLayer;
 
 use crate::configuration::{DatabaseSettings, Settings};
 use crate::email_client::EmailClient;
@@ -46,7 +49,8 @@ impl Application
             db_pool, 
             email_client, 
             config.application.base_url,
-            HmacSecret(config.application.hmac_secret),
+            config.application.hmac_secret,
+            config.redis_uri,
         )?;
 
         Ok(Self { port, server })
@@ -68,38 +72,48 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub email_client: EmailClient,
     pub base_url: String,
-    pub secret: HmacSecret,
+    pub secret: Key,
 }
-
-#[derive(Clone)]
-pub struct HmacSecret(pub Secret<String>);
 
 pub fn run(
     listener: TcpListener,
     db_pool: PgPool,
     email_client: EmailClient,
     base_url: String,
-    hmac_secret: HmacSecret,
+    secret: Secret<String>,
+    redis_uri: Secret<String>,
 ) -> Result<MyServer, hyper::Error> {
     let address = listener.local_addr().expect("Failed to get local address");
-    let app = app_router(db_pool, email_client, base_url, hmac_secret);
+    let app = app_router(db_pool, email_client, base_url, secret.clone());
+    
+    let store = RedisSessionStore::new(redis_uri.expose_secret().as_str()).unwrap();
+    let session_layer = SessionLayer::new(store, secret.expose_secret().as_bytes());
+
     tracing::info!("listening on {}", address);
     // launch the application
     let server = axum::Server::from_tcp(listener)?;
-    Ok(server.serve(app.into_make_service()))
+    Ok(server.serve(
+           app
+            .layer(session_layer)
+            // A span is created for each request and ends with the response is sent
+            .layer(TraceLayer::new_for_http().make_span_with(TowerMakeSpanWithConstantId))
+            .layer(RequestIdLayer)
+            .into_make_service()
+        )
+    )
 }
 
 pub fn app_router(
     db_pool: PgPool, 
     email_client: EmailClient, 
     base_url: String,
-    hmac_secret: HmacSecret,
+    secret: Secret<String>,
 ) -> Router {
     let app_state = AppState {
         db_pool,
         email_client,
         base_url,
-        secret: hmac_secret,
+        secret: Key::from(secret.expose_secret().as_bytes()),
     };
     Router::new()
         .route("/health_check", get(health_check))
@@ -108,10 +122,10 @@ pub fn app_router(
         .route("/subscriptions", post(subscribe))
         .route("/subscriptions/confirm", get(confirm))
         .route("/newsletters", post(publish_newsletter))
+        .route("/admin/dashboard", get(admin_dashboard))
+        .route("/admin/password", get(change_password_form).post(change_password))
+        .route("/admin/logout", post(logout))
         .with_state(app_state)
-        // A span is created for each request and ends with the response is sent
-        .layer(TraceLayer::new_for_http().make_span_with(TowerMakeSpanWithConstantId))
-        .layer(RequestIdLayer)
 }
 
 pub fn get_connection_pool(config: &DatabaseSettings) -> PgPool {
